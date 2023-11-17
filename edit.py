@@ -13,6 +13,8 @@ CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".config", "gimp-dall-e")
 CONFIG_FILE_NAME = "openai_key.json"
 API_PATH = "https://api.openai.com/v1/images/edits"
 
+THRESHOLD=40
+
 MODEL_MAP = {
         0: "dall-e-2",
         }
@@ -38,35 +40,50 @@ def get_openai_api_key():
             return json.load(f).get("api_key", "")
     return ""
 
-def send_request(image, layer, model, api_key, prompt, size, n):
+
+def resize_to_match(image_to_resize, reference_image_layer):
+    # Obtemc as dimensoes da camada de referencia
+    ref_width = pdb.gimp_drawable_width(reference_image_layer)
+    ref_height = pdb.gimp_drawable_height(reference_image_layer)
+
+    # Redimensiona a imagem para corresponder as dimensoes da camada de referencia
+    pdb.gimp_image_scale(image_to_resize, ref_width, ref_height)
+
+
+def compare_images(image_with_space_path, image_filled_path):
+    result_path = "/tmp/difference_image.png"
+
+    image_filled = pdb.gimp_file_load(image_filled_path, image_filled_path)
+
+    layer_with_space = pdb.gimp_file_load_layer(image_filled, image_with_space_path)
+    resize_to_match(image_filled, layer_with_space)
+    pdb.gimp_image_insert_layer(image_filled, layer_with_space, None, 0)
+
+    pdb.gimp_layer_set_mode(layer_with_space, LAYER_MODE_SUBTRACT)
+
+    new_layer = pdb.gimp_layer_new_from_visible(image_filled, image_filled, "diff")
+    pdb.gimp_image_insert_layer(image_filled, new_layer, None, 0)
+
+    pdb.gimp_by_color_select(new_layer, (0, 0, 0), THRESHOLD, CHANNEL_OP_REPLACE, False, True, 0, False)
+
+    # pdb.gimp_selection_invert(image_filled)
+
+    pdb.gimp_edit_clear(new_layer)
+
+    pdb.gimp_selection_none(image_filled)
+
+    pdb.file_png_save_defaults(image_filled, new_layer, result_path, result_path)
+
+    return result_path
+
+def send_request(image_path, model, api_key, prompt, size, n):
     print("Preparing to send request...")
-
-    if not pdb.gimp_edit_copy_visible(image) :
-        return
-
-    version = map(int, pdb.gimp_version().split('.'))
-    if version[0] > 2 or version[0] == 2 and version[1] > 8:
-        new_image = pdb.gimp_edit_paste_as_new_image()
-    else:
-        new_image = pdb.gimp_edit_paste_as_new()
-
-    # Salvar a imagem temporariamente
-    temp_path = "/tmp/temp_image.png"
-    pdb.gimp_layer_add_alpha(new_image.layers[0])
-    pdb.gimp_file_save(new_image, new_image.layers[0], temp_path, temp_path)
-    # pdb.file_png_save_defaults(image, image.layers[0], temp_path, temp_path)
-    
-    print("Sending request to OpenAI API...")   
-    print("Model: " + model)
-    print("Prompt: " + prompt)
-    print("Size: " + size)
-    print("N: " + str(n))
-    print("API Key: " + api_key)
+    pdb.gimp_progress_set_text("Preparing to send request...")
 
     # Construir a chamada de API
     url = "https://api.openai.com/v1/images/edits"
     headers = {"Authorization": "Bearer " + api_key}
-    files = {'image': open(temp_path, 'rb')}
+    files = {'image': open(image_path, 'rb')}
     data = {
         'model': model,
         'prompt': prompt,
@@ -101,7 +118,6 @@ def send_request(image, layer, model, api_key, prompt, size, n):
     with open("/tmp/body.txt", "w") as f:
         f.write(body)
 
-    # Enviar a requisicao para a API usando urllib2
     request = urllib2.Request(url, body)
     for key, value in headers.items():
         request.add_header(key, value)
@@ -111,6 +127,7 @@ def send_request(image, layer, model, api_key, prompt, size, n):
     
 
     print("Reading response...")
+    pdb.gimp_progress_set_text("Reading response...")
     try:
         response = urllib2.urlopen(request)
     except urllib2.HTTPError as e:
@@ -130,11 +147,9 @@ def send_request(image, layer, model, api_key, prompt, size, n):
     print(response)
     response = json.load(response)
 
-    # with open(response_dump_path, "r") as f:
-    #     response = json.load(f)
-
     # Salvar a imagem de saida
     print("Saving output image...")
+    pdb.gimp_progress_set_text("Saving output image...")
     output_path = tempfile.mktemp()
     processed_images = []
     # Convert all base64 images to binary
@@ -148,11 +163,44 @@ def send_request(image, layer, model, api_key, prompt, size, n):
 
         # add image to processed images list
         processed_images.append(final_path)
+    return processed_images
 
-    # Adicionar a imagem de volta ao GIMP como uma nova camada
-    for image_path in processed_images:
-        new_layer = pdb.gimp_file_load_layer(new_image, image_path)
-        pdb.gimp_image_insert_layer(new_image, new_layer, None, 0)
+def process_image(image, drawable, model, api_key, prompt, size, n):
+    # gimp.context_push()
+
+    # # Garante que ha uma selecao ativa
+    # if pdb.gimp_selection_is_empty(image):
+    #     gimp.message("Por favor, selecione uma regiao primeiro.")
+    #     return
+
+    # # saves the image without the selection
+    # image_copy = pdb.gimp_image_duplicate(image)
+    # drawable_copy = pdb.gimp_image_get_active_layer(image_copy)
+
+    # pdb.gimp_edit_clear(drawable_copy)
+
+    # Salva a nova imagem como um arquivo temporario
+    image_with_space = os.path.join("/tmp", "image_with_space.png")
+
+    # pdb.gimp_file_save(image_copy, drawable_copy, image_with_space, image_with_space, run_mode=1)
+
+    # processed_images = send_request(image_with_space, model, api_key, prompt, size, n)
+
+    compare_images(image_with_space, "/tmp/tmpSgwaiu-0.png")
+
+    #pdb.gimp_image_delete(image_copy)
+    #gimp.context_pop()
+
+    # buffer_name = "dall-e_selection"
+    # if pdb.gimp_edit_named_copy(image.layers[0], buffer_name) == False: return
+
+    # pdb.gimp_edit_named_paste(image.layers[0], buffer_name, True)
+
+
+    ## Adicionar a imagem de volta ao GIMP como uma nova camada
+    #for image_path in processed_images:
+    #    new_layer = pdb.gimp_file_load_layer(image, image_path)
+    #    pdb.gimp_image_insert_layer(image, new_layer, None, 0)
 
     # new_layer = pdb.gimp_file_load_layer(image, output_path)
     # pdb.gimp_image_insert_layer(image, new_layer, None, 0)
@@ -185,7 +233,7 @@ def dall_e(image, layer, model, api_key, prompt):
 
     size = "512x512"
     n = 1
-    send_request(image, layer, model, api_key, prompt, size, n)
+    process_image(image, layer, model, api_key, prompt, size, n)
 
 
 register(
@@ -197,7 +245,7 @@ register(
     "",
     [        
         (PF_IMAGE, "image", "Input image", None),
-        (PF_LAYER, "layer", "Input layer", None),
+        (PF_DRAWABLE, "drawable", "Input layer", None),
         (PF_OPTION, "model", "Model", 0, (MODEL_MAP[0],)),
         (PF_STRING, "api_key", "OpenAI Key", mask_openai_api_key(get_openai_api_key())),
         (PF_TEXT, "prompt", "Prompt", " "),
