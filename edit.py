@@ -49,33 +49,6 @@ def resize_to_match(image_to_resize, reference_image_layer):
     # Redimensiona a imagem para corresponder as dimensoes da camada de referencia
     pdb.gimp_image_scale(image_to_resize, ref_width, ref_height)
 
-
-def compare_images(image_with_space_path, image_filled_path):
-    result_path = "/tmp/difference_image.png"
-
-    image_filled = pdb.gimp_file_load(image_filled_path, image_filled_path)
-
-    layer_with_space = pdb.gimp_file_load_layer(image_filled, image_with_space_path)
-    resize_to_match(image_filled, layer_with_space)
-    pdb.gimp_image_insert_layer(image_filled, layer_with_space, None, 0)
-
-    pdb.gimp_layer_set_mode(layer_with_space, LAYER_MODE_SUBTRACT)
-
-    new_layer = pdb.gimp_layer_new_from_visible(image_filled, image_filled, "diff")
-    pdb.gimp_image_insert_layer(image_filled, new_layer, None, 0)
-
-    pdb.gimp_by_color_select(new_layer, (0, 0, 0), THRESHOLD, CHANNEL_OP_REPLACE, False, True, 0, False)
-
-    # pdb.gimp_selection_invert(image_filled)
-
-    pdb.gimp_edit_clear(new_layer)
-
-    pdb.gimp_selection_none(image_filled)
-
-    pdb.file_png_save_defaults(image_filled, new_layer, result_path, result_path)
-
-    return result_path
-
 def send_request(image_path, model, api_key, prompt, size, n):
     print("Preparing to send request...")
     pdb.gimp_progress_set_text("Preparing to send request...")
@@ -165,28 +138,55 @@ def send_request(image_path, model, api_key, prompt, size, n):
         processed_images.append(final_path)
     return processed_images
 
+def extract_dalle_completions(original_image, filled_image_path, selection_coordinates):
+    """
+    transform the selection_channel into a selection on the filled image
+    """
+
+    x1, y1, x2, y2 = selection_coordinates
+
+    filled_image = pdb.gimp_file_load(filled_image_path, filled_image_path)
+    pdb.gimp_layer_add_alpha(filled_image.active_layer)
+    resize_to_match(filled_image, original_image.layers[0])
+
+    width = x2 - x1
+    height = y2 - y1
+
+    pdb.gimp_image_select_rectangle(filled_image, CHANNEL_OP_REPLACE, x1, y1, width, height)
+
+    pdb.gimp_selection_invert(filled_image)
+    pdb.gimp_edit_clear(filled_image.layers[0])
+
+    pdb.gimp_file_save(filled_image, filled_image.layers[0], filled_image_path+"extracted.png", filled_image_path+"extracted.png")
+
 def process_image(image, drawable, model, api_key, prompt, size, n):
     # gimp.context_push()
 
-    # # Garante que ha uma selecao ativa
-    # if pdb.gimp_selection_is_empty(image):
-    #     gimp.message("Por favor, selecione uma regiao primeiro.")
-    #     return
+    if pdb.gimp_selection_is_empty(image):
+        gimp.message("Please, select a region first.")
+        return
 
-    # # saves the image without the selection
-    # image_copy = pdb.gimp_image_duplicate(image)
-    # drawable_copy = pdb.gimp_image_get_active_layer(image_copy)
+    # save the selection's coordinates
+    _, x1, y1, x2, y2 = pdb.gimp_selection_bounds(image)
 
-    # pdb.gimp_edit_clear(drawable_copy)
+    selection_coordinates = [x1, y1, x2, y2]
 
-    # Salva a nova imagem como um arquivo temporario
+    # saves the image without the selection
+    image_copy = pdb.gimp_image_duplicate(image)
+    drawable_copy = pdb.gimp_image_get_active_drawable(image_copy)
+    print(drawable_copy)
+
+    pdb.gimp_edit_clear(drawable_copy)
+
     image_with_space = os.path.join("/tmp", "image_with_space.png")
-
     # pdb.gimp_file_save(image_copy, drawable_copy, image_with_space, image_with_space, run_mode=1)
 
     # processed_images = send_request(image_with_space, model, api_key, prompt, size, n)
 
-    compare_images(image_with_space, "/tmp/tmpSgwaiu-0.png")
+    # compare_images(image_with_space, "/tmp/tmpJF1a2m-0.png")
+
+    extract_dalle_completions(image, "/tmp/tmpJF1a2m-0.png", selection_coordinates)
+
 
     #pdb.gimp_image_delete(image_copy)
     #gimp.context_pop()
