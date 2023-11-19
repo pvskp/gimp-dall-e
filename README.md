@@ -10,6 +10,12 @@ This repository contains a GIMP plugin for integrating with OpenAI's DALL-E serv
 - **Create new images**: Generate entirely new images based on textual prompts, offering various customization options like image size, style, and quality.
 - **Configurable models**: Choose between different DALL-E models for varied results.
 
+## Requirements
+
+- GIMP (version 2.10 or later recommended)
+- Active OpenAI API key
+- Python 2.7, once this is the only one currently supported by stable GIMP.
+
 ## Installation
 
 To install the DALL-E GIMP Plugin, follow these steps:
@@ -42,10 +48,9 @@ Before using the plugin, you need to set your OpenAI API key:
 2. Enter your desired prompt and adjust settings like model, image size, style, and quality.
 3. Click `OK` to generate a new image.
 
-## Requirements
+## Known Limitations
 
-- GIMP (version 2.10 or later recommended)
-- Active OpenAI API key
+- Large images: Until now (11/2023), DALL-E OpenAI API's does not support images with size > 4mb. So, to allow the user to edit it's image anyway, this plugin tries, incrementally, to reduce the size of the image, affecting the final result.
 
 ## License
 
