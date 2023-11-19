@@ -4,6 +4,8 @@
 
 This repository contains a GIMP plugin for integrating with OpenAI's DALL-E service, a powerful AI model that can generate and edit images based on textual descriptions. The plugin offers two main functionalities: creating new images and editing existing ones using DALL-E's capabilities.
 
+![dalle.gif]() 
+
 ## Features
 
 - **Edit existing images**: Select a region in an image and use DALL-E to fill or modify that region based on a given prompt.
