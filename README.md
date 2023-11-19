@@ -4,7 +4,7 @@
 
 This repository contains a GIMP plugin for integrating with OpenAI's DALL-E service, a powerful AI model that can generate and edit images based on textual descriptions. The plugin offers two main functionalities: creating new images and editing existing ones using DALL-E's capabilities.
 
-![dalle.gif]() 
+![](https://github.com/pvskp/gimp-dall-e/blob/main/demo/dalle.gif) 
 
 ## Features
 
@@ -24,7 +24,7 @@ To install the DALL-E GIMP Plugin, follow these steps:
 
 1. Ensure you have GIMP installed on your system.
 2. Clone this repository or download the source code.
-3. Copy the plugin files (`dall-e_edit.py` and `dall-e_create.py`) to your GIMP plugin directory. Typically, this directory is located at `~/.config/GIMP/2.10/plug-ins` on Linux or `C:\Users\YourUsername\AppData\Roaming\GIMP\2.10\plug-ins` on Windows.
+3. Copy the plugin files on plug-ins/ (`dall-e_edit.py` and `dall-e_create.py`) to your GIMP plugin directory. Typically, this directory is located at `~/.config/GIMP/2.10/plug-ins` on Linux or `C:\Users\YourUsername\AppData\Roaming\GIMP\2.10\plug-ins` on Windows.
 4. Restart GIMP to load the new plugin.
 
 ## Usage
