@@ -12,15 +12,8 @@ import tempfile
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".config", "gimp-dall-e")
 CONFIG_FILE_NAME = "openai_key.json"
 API_PATH = "https://api.openai.com/v1/images/edits"
-
-IMAGE_MAX_SIZE_MB=4
-
-THRESHOLD=40
-
-MODEL_MAP = {
-        0: "dall-e-2",
-        }
-
+IMAGE_MAX_SIZE_MB=3.99
+MODEL_MAP = { 0: "dall-e-2" }
 IMAGES_POSSIBLE_SIZE = {
         "256x256": "256x256",
         "512x512": "512x512",
@@ -33,16 +26,39 @@ def create_config_dir():
 
 # saves the openai api key in a json file
 def save_openai_api_key(api_key):
+    """
+    Saves the OpenAI API key in a JSON file.
+    Args:
+        api_key: the OpenAI API key
+    Returns:
+        None
+    """
+
     create_config_dir()
     j = {"api_key": api_key}
     with open(os.path.join(CONFIG_DIR, CONFIG_FILE_NAME), "w") as f: json.dump(j, f)
 
 def mask_openai_api_key(api_key):
+    """
+    Masks the OpenAI API key.
+    Args:
+        api_key: the OpenAI API key
+    Returns:
+        The masked OpenAI API key
+    """
+
     if get_openai_api_key() == "": return ""
     return api_key[:2] + "*" * (len(api_key) - 4) + api_key[-2:]
 
 def get_openai_api_key():
-    # check if config file does exists, if does, read it and return the api key
+    """
+    Returns the OpenAI API key.
+    Args:
+        None
+    Returns:
+        The OpenAI API key
+    """
+
     if os.path.exists(os.path.join(CONFIG_DIR, CONFIG_FILE_NAME)):
         with open(os.path.join(CONFIG_DIR, CONFIG_FILE_NAME), "r") as f:
             return json.load(f).get("api_key", "")
@@ -50,7 +66,17 @@ def get_openai_api_key():
 
 def get_file_size(fp): return (os.path.getsize(fp)/(1024 ** 2))
 
-def reduce_until_size_met(image, drawable, scale_factor=0.9, temp_filename):
+def reduce_until_size_met(image, drawable, scale_factor, temp_filename):
+    """
+    Reduces the image size until it fits the max size.
+    Args:
+        image: the image to resize
+        drawable: the drawable to resize
+        scale_factor: the scale factor to use
+        temp_filename: the temporary filename to use
+    Returns:
+        None
+    """
     current_size = get_file_size(temp_filename)
     while current_size > IMAGE_MAX_SIZE_MB:
         new_width = int(drawable.width * scale_factor)
@@ -60,19 +86,37 @@ def reduce_until_size_met(image, drawable, scale_factor=0.9, temp_filename):
         pdb.file_jpeg_save(image, drawable, temp_filename, temp_filename, 0.85, 0, 1, 0, "", 0, 0, 0, 0)
         current_size = get_file_size(temp_filename)
 
-    return temp_filename
-
 def resize_to_match(image_to_resize, reference_image_layer):
+    """
+    Resizes the image to match the reference image layer.
+    Args:
+        image_to_resize: the image to resize
+        reference_image_layer: the reference image layer
+    Returns:
+        None
+    """
     ref_width = pdb.gimp_drawable_width(reference_image_layer)
     ref_height = pdb.gimp_drawable_height(reference_image_layer)
 
     pdb.gimp_image_scale(image_to_resize, ref_width, ref_height)
 
 def send_request(image_path, model, api_key, prompt, size, n):
+    """
+    Sends the request to the OpenAI API.
+    Args:
+        image_path: the path to the image
+        model: the model to use
+        api_key: the OpenAI API key
+        prompt: the prompt to use
+        size: the size of the image
+        n: the number of completions
+    Returns:
+        None
+    """
     print("Preparing to send request...")
     pdb.gimp_progress_set_text("Preparing to send request...")
 
-    url = "https://api.openai.com/v1/images/edits"
+    url = API_PATH
     headers = {"Authorization": "Bearer " + api_key}
     files = {'image': open(image_path, 'rb')}
     data = {
@@ -83,7 +127,7 @@ def send_request(image_path, model, api_key, prompt, size, n):
         'response_format': 'b64_json'
     }
 
-    # Configurar o delimitador para a requisicao multipart/form-data
+    # set the content type to multipart/form-data
     boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW"
     headers['Content-Type'] = 'multipart/form-data; boundary={}'.format(boundary)
     
@@ -106,9 +150,6 @@ def send_request(image_path, model, api_key, prompt, size, n):
     request = urllib2.Request(url, body)
     for key, value in headers.items():
         request.add_header(key, value)
-
-    print("Headers:")
-    print(request.headers)
     
     pdb.gimp_progress_set_text("Reading response...")
     try:
@@ -117,19 +158,18 @@ def send_request(image_path, model, api_key, prompt, size, n):
         with open("/tmp/error.txt", "w") as f:
             f.write(e.read())
         print("HTTPError: " + str(e.code))
-        bad_response = json.load(e)
+        bad_response = json.load(e.read())
         print(e.read())
         gimp.message("Error: " + bad_response["error"]["message"])
         return
 
-    print(response)
     response = json.load(response)
 
     print("Saving output image...")
     pdb.gimp_progress_set_text("Saving output image...")
     out_prefix = tempfile.mktemp()
-    output_path = out_prefix + ".png"
     processed_images = []
+
     # Convert all base64 images to binary
     for idx, value in enumerate(response["data"]):
         img_decoded = b64decode(value["b64_json"])
@@ -152,8 +192,11 @@ def extract_dalle_completions(original_image, filled_image_path, selection_coord
     """
     x1, y1, x2, y2 = selection_coordinates
 
+    # load the filled image
     filled_image = pdb.gimp_file_load(filled_image_path, filled_image_path)
     pdb.gimp_layer_add_alpha(filled_image.active_layer)
+    
+    # resize the filled image to match the original image
     resize_to_match(filled_image, original_image.layers[0])
 
     width = x2 - x1
@@ -161,12 +204,26 @@ def extract_dalle_completions(original_image, filled_image_path, selection_coord
 
     pdb.gimp_image_select_rectangle(filled_image, CHANNEL_OP_REPLACE, x1, y1, width, height)
 
+    # invert the selection and clear it
     pdb.gimp_selection_invert(filled_image)
     pdb.gimp_edit_clear(filled_image.layers[0])
 
     pdb.gimp_file_save(filled_image, filled_image.layers[0], filled_image_path, filled_image_path)
 
 def process_image(image, drawable, model, api_key, prompt, size, n):
+    """
+    Process the image and paste the result in the original image.
+    Args:
+        image: the original image
+        drawable: the original drawable
+        model: the model to use
+        api_key: the OpenAI API key
+        prompt: the prompt to use
+        size: the size of the image
+        n: the number of completions
+    Returns:
+        None
+    """
     # check if there is a selection
     if pdb.gimp_selection_is_empty(image):
         gimp.message("Please, select a region first.")
@@ -186,22 +243,25 @@ def process_image(image, drawable, model, api_key, prompt, size, n):
     pdb.gimp_edit_clear(drawable_copy)
 
     image_with_space = tempfile.mktemp() + ".png"
-    # pdb.gimp_file_save(image_copy, drawable_copy, image_with_space, image_with_space, run_mode=1)
-    pdb.file_png_save(image_copy, drawable_copy, image_with_space, image_with_space, 0, 9, 0, 0, 0, 0, 0)
+    pdb.gimp_file_save(image_copy, drawable_copy, image_with_space, image_with_space, run_mode=1)
 
     # if image is too big, reduce it until it fits the max size
     if get_file_size(image_with_space) > IMAGE_MAX_SIZE_MB:
-        image_with_space = reduce_until_size_met(image, drawable, temp_filename=image_with_space)
+        gimp.message("Image is too big. Resizing...")
+        reduce_until_size_met(image, drawable, 0.9, image_with_space)
 
     # send request to openai
     processed_images = send_request(image_with_space, model, api_key, prompt, size, n)
+    os.remove(image_with_space)
 
     for path in processed_images:
+        # extract the selected region from the filled image and paste it in the original image
         extract_dalle_completions(image, path, selection_coordinates)
         new_layer = pdb.gimp_file_load_layer(image, path)
         pdb.gimp_image_insert_layer(image, new_layer, None, -1)
-        # os.remove(path)
+        os.remove(path)
 
+    # update the image
     pdb.gimp_displays_flush()
 
 def dall_e(image, layer, model, size, api_key, prompt):
