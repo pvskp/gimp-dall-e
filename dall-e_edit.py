@@ -8,6 +8,8 @@ import urllib
 from base64 import b64decode
 import mimetypes
 import tempfile
+from threading import Thread
+import time
 
 CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".config", "gimp-dall-e")
 CONFIG_FILE_NAME = "openai_key.json"
@@ -67,6 +69,12 @@ def get_openai_api_key():
 def get_file_size(fp): return (os.path.getsize(fp)/(1024 ** 2))
 
 def reduce_until_size_met(image, drawable, scale_factor, temp_filename):
+    # using thread because it's faster. see: https://stackoverflow.com/a/28084915
+    t = Thread(target=thread_reduce_until_size_met, args=(image, drawable, scale_factor, temp_filename))
+    t.start()
+    t.join()
+
+def thread_reduce_until_size_met(image, drawable, scale_factor, temp_filename):
     """
     Reduces the image size until it fits the max size.
     Args:
@@ -79,12 +87,18 @@ def reduce_until_size_met(image, drawable, scale_factor, temp_filename):
     """
     current_size = get_file_size(temp_filename)
     while current_size > IMAGE_MAX_SIZE_MB:
+
+        if current_size > 10: scale_factor = 0.7
+        pdb.gimp_progress_set_text("Image still too big. Resizing again...")
+        time.sleep(0.5)
         new_width = int(drawable.width * scale_factor)
         new_height = int(drawable.height * scale_factor)
         pdb.gimp_image_scale(image, new_width, new_height)
+        pdb.gimp_layer_resize_to_image_size(drawable)
 
-        pdb.file_jpeg_save(image, drawable, temp_filename, temp_filename, 0.85, 0, 1, 0, "", 0, 0, 0, 0)
+        pdb.file_png_save_defaults(image, drawable, temp_filename, temp_filename)
         current_size = get_file_size(temp_filename)
+        print("Current size:", current_size)
 
 def resize_to_match(image_to_resize, reference_image_layer):
     """
@@ -155,12 +169,9 @@ def send_request(image_path, model, api_key, prompt, size, n):
     try:
         response = urllib2.urlopen(request)
     except urllib2.HTTPError as e:
-        with open("/tmp/error.txt", "w") as f:
-            f.write(e.read())
         print("HTTPError: " + str(e.code))
-        bad_response = json.load(e.read())
         print(e.read())
-        gimp.message("Error: " + bad_response["error"]["message"])
+        gimp.message("Error: " + str(e.reason))
         return
 
     response = json.load(response)
@@ -247,8 +258,8 @@ def process_image(image, drawable, model, api_key, prompt, size, n):
 
     # if image is too big, reduce it until it fits the max size
     if get_file_size(image_with_space) > IMAGE_MAX_SIZE_MB:
-        gimp.message("Image is too big. Resizing...")
-        reduce_until_size_met(image, drawable, 0.9, image_with_space)
+        pdb.gimp_progress_set_text("Image is too big. Resizing...")
+        reduce_until_size_met(image_copy, drawable_copy, 0.1, image_with_space)
 
     # send request to openai
     processed_images = send_request(image_with_space, model, api_key, prompt, size, n)
