@@ -13,10 +13,18 @@ CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".config", "gimp-dall-e")
 CONFIG_FILE_NAME = "openai_key.json"
 API_PATH = "https://api.openai.com/v1/images/edits"
 
+IMAGE_MAX_SIZE_MB=4
+
 THRESHOLD=40
 
 MODEL_MAP = {
         0: "dall-e-2",
+        }
+
+IMAGES_POSSIBLE_SIZE = {
+        "256x256": "256x256",
+        "512x512": "512x512",
+        "1024x1024": "1024x1024",
         }
 
 # validate if config dir does exists and, if not, create it
@@ -40,20 +48,30 @@ def get_openai_api_key():
             return json.load(f).get("api_key", "")
     return ""
 
+def get_file_size(fp): return (os.path.getsize(fp)/(1024 ** 2))
+
+def reduce_until_size_met(image, drawable, scale_factor=0.9, temp_filename):
+    current_size = get_file_size(temp_filename)
+    while current_size > IMAGE_MAX_SIZE_MB:
+        new_width = int(drawable.width * scale_factor)
+        new_height = int(drawable.height * scale_factor)
+        pdb.gimp_image_scale(image, new_width, new_height)
+
+        pdb.file_jpeg_save(image, drawable, temp_filename, temp_filename, 0.85, 0, 1, 0, "", 0, 0, 0, 0)
+        current_size = get_file_size(temp_filename)
+
+    return temp_filename
 
 def resize_to_match(image_to_resize, reference_image_layer):
-    # Obtemc as dimensoes da camada de referencia
     ref_width = pdb.gimp_drawable_width(reference_image_layer)
     ref_height = pdb.gimp_drawable_height(reference_image_layer)
 
-    # Redimensiona a imagem para corresponder as dimensoes da camada de referencia
     pdb.gimp_image_scale(image_to_resize, ref_width, ref_height)
 
 def send_request(image_path, model, api_key, prompt, size, n):
     print("Preparing to send request...")
     pdb.gimp_progress_set_text("Preparing to send request...")
 
-    # Construir a chamada de API
     url = "https://api.openai.com/v1/images/edits"
     headers = {"Authorization": "Bearer " + api_key}
     files = {'image': open(image_path, 'rb')}
@@ -69,7 +87,6 @@ def send_request(image_path, model, api_key, prompt, size, n):
     boundary = "----WebKitFormBoundary7MA4YWxkTrZu0gW"
     headers['Content-Type'] = 'multipart/form-data; boundary={}'.format(boundary)
     
-    # Construir o corpo da requisicao multipart/form-data
     body = ""
     for key, value in data.items():
         body += "--{}\r\n".format(boundary)
@@ -84,12 +101,7 @@ def send_request(image_path, model, api_key, prompt, size, n):
         body += 'Content-Type: {}\r\n\r\n'.format(mime_type or 'application/octet-stream')
         body += file_content + "\r\n"
 
-
     body += "--{}--\r\n".format(boundary)
-
-    # save body to file for debugging
-    with open("/tmp/body.txt", "w") as f:
-        f.write(body)
 
     request = urllib2.Request(url, body)
     for key, value in headers.items():
@@ -98,8 +110,6 @@ def send_request(image_path, model, api_key, prompt, size, n):
     print("Headers:")
     print(request.headers)
     
-
-    print("Reading response...")
     pdb.gimp_progress_set_text("Reading response...")
     try:
         response = urllib2.urlopen(request)
@@ -107,42 +117,39 @@ def send_request(image_path, model, api_key, prompt, size, n):
         with open("/tmp/error.txt", "w") as f:
             f.write(e.read())
         print("HTTPError: " + str(e.code))
+        bad_response = json.load(e)
         print(e.read())
-        gimp.message("HTTPError: " + str(e.code))
+        gimp.message("Error: " + bad_response["error"]["message"])
         return
-
-    # dumps response json to file for debugging
-    # print("Saving response...")
-    # response_dump_path = tempfile.mktemp(suffix=".json")
-    # with open(response_dump_path, "w") as f:
-    #     f.write(response.read())
 
     print(response)
     response = json.load(response)
 
-    # Salvar a imagem de saida
     print("Saving output image...")
     pdb.gimp_progress_set_text("Saving output image...")
-    output_path = tempfile.mktemp()
+    out_prefix = tempfile.mktemp()
+    output_path = out_prefix + ".png"
     processed_images = []
     # Convert all base64 images to binary
     for idx, value in enumerate(response["data"]):
         img_decoded = b64decode(value["b64_json"])
-        # save image to file 
-
-        final_path = output_path + "-" + str(idx) + ".png"
-        with open(output_path + "-" + str(idx) + ".png", "wb") as f:
+        final_path = out_prefix + "-" + str(idx) + ".png"
+        with open(final_path, "wb") as f:
             f.write(img_decoded)
 
-        # add image to processed images list
         processed_images.append(final_path)
     return processed_images
 
 def extract_dalle_completions(original_image, filled_image_path, selection_coordinates):
     """
-    transform the selection_channel into a selection on the filled image
+    Extracts the selected region from the filled image and pastes it in the original image.
+    Args:
+        original_image: the image with the selection
+        filled_image_path: the image with the filled region
+        selection_coordinates: the coordinates of the selection in the original image
+    Returns:
+        None
     """
-
     x1, y1, x2, y2 = selection_coordinates
 
     filled_image = pdb.gimp_file_load(filled_image_path, filled_image_path)
@@ -157,62 +164,47 @@ def extract_dalle_completions(original_image, filled_image_path, selection_coord
     pdb.gimp_selection_invert(filled_image)
     pdb.gimp_edit_clear(filled_image.layers[0])
 
-    pdb.gimp_file_save(filled_image, filled_image.layers[0], filled_image_path+"extracted.png", filled_image_path+"extracted.png")
+    pdb.gimp_file_save(filled_image, filled_image.layers[0], filled_image_path, filled_image_path)
 
 def process_image(image, drawable, model, api_key, prompt, size, n):
-    # gimp.context_push()
-
+    # check if there is a selection
     if pdb.gimp_selection_is_empty(image):
         gimp.message("Please, select a region first.")
         return
 
-    # save the selection's coordinates
+    if not pdb.gimp_drawable_has_alpha(drawable):
+        pdb.gimp_layer_add_alpha(drawable)
+
     _, x1, y1, x2, y2 = pdb.gimp_selection_bounds(image)
 
     selection_coordinates = [x1, y1, x2, y2]
 
-    # saves the image without the selection
+    # copy the selected region to a new image
     image_copy = pdb.gimp_image_duplicate(image)
+    pdb.gimp_layer_resize_to_image_size(image_copy.layers[0])
     drawable_copy = pdb.gimp_image_get_active_drawable(image_copy)
-    print(drawable_copy)
-
     pdb.gimp_edit_clear(drawable_copy)
 
-    image_with_space = os.path.join("/tmp", "image_with_space.png")
+    image_with_space = tempfile.mktemp() + ".png"
     # pdb.gimp_file_save(image_copy, drawable_copy, image_with_space, image_with_space, run_mode=1)
+    pdb.file_png_save(image_copy, drawable_copy, image_with_space, image_with_space, 0, 9, 0, 0, 0, 0, 0)
 
-    # processed_images = send_request(image_with_space, model, api_key, prompt, size, n)
+    # if image is too big, reduce it until it fits the max size
+    if get_file_size(image_with_space) > IMAGE_MAX_SIZE_MB:
+        image_with_space = reduce_until_size_met(image, drawable, temp_filename=image_with_space)
 
-    # compare_images(image_with_space, "/tmp/tmpJF1a2m-0.png")
+    # send request to openai
+    processed_images = send_request(image_with_space, model, api_key, prompt, size, n)
 
-    extract_dalle_completions(image, "/tmp/tmpJF1a2m-0.png", selection_coordinates)
+    for path in processed_images:
+        extract_dalle_completions(image, path, selection_coordinates)
+        new_layer = pdb.gimp_file_load_layer(image, path)
+        pdb.gimp_image_insert_layer(image, new_layer, None, -1)
+        # os.remove(path)
 
+    pdb.gimp_displays_flush()
 
-    #pdb.gimp_image_delete(image_copy)
-    #gimp.context_pop()
-
-    # buffer_name = "dall-e_selection"
-    # if pdb.gimp_edit_named_copy(image.layers[0], buffer_name) == False: return
-
-    # pdb.gimp_edit_named_paste(image.layers[0], buffer_name, True)
-
-
-    ## Adicionar a imagem de volta ao GIMP como uma nova camada
-    #for image_path in processed_images:
-    #    new_layer = pdb.gimp_file_load_layer(image, image_path)
-    #    pdb.gimp_image_insert_layer(image, new_layer, None, 0)
-
-    # new_layer = pdb.gimp_file_load_layer(image, output_path)
-    # pdb.gimp_image_insert_layer(image, new_layer, None, 0)
-
-    # # Remover a camada temporaria
-    # pdb.gimp_item_delete(new_layer)
-
-    # Atualizar a exibicao do GIMP
-    gimp.displays_flush()
-
-
-def dall_e(image, layer, model, api_key, prompt):
+def dall_e(image, layer, model, size, api_key, prompt):
     model = MODEL_MAP[model]
     print("DALL-E plugin started...")
 
@@ -231,7 +223,6 @@ def dall_e(image, layer, model, api_key, prompt):
         print("Saving OpenAI API key.")
         save_openai_api_key(api_key)
 
-    size = "512x512"
     n = 1
     process_image(image, layer, model, api_key, prompt, size, n)
 
@@ -245,8 +236,9 @@ register(
     "",
     [        
         (PF_IMAGE, "image", "Input image", None),
-        (PF_DRAWABLE, "drawable", "Input layer", None),
-        (PF_OPTION, "model", "Model", 0, (MODEL_MAP[0],)),
+        (PF_DRAWABLE, "drawable", "Input drawable", None),
+        (PF_OPTION, "model", "Model", 0, tuple(MODEL_MAP.values())),
+        (PF_RADIO, "size", "Image size", "512x512", tuple(IMAGES_POSSIBLE_SIZE.items())),
         (PF_STRING, "api_key", "OpenAI Key", mask_openai_api_key(get_openai_api_key())),
         (PF_TEXT, "prompt", "Prompt", " "),
     ],
