@@ -58,10 +58,6 @@ Before using the plugin, you need to set your OpenAI API key:
 
 This project is licensed under the MIT License - see the LICENSE file for details.
 
-## Author
-
-pvskp
-
 ## Contributing
 
 Contributions to the DALL-E GIMP Plugin are welcome. Please feel free to fork the repository, make changes, and submit pull requests.
