@@ -52,7 +52,7 @@ Before using the plugin, you need to set your OpenAI API key:
 
 ## Known Limitations
 
-- Large images: Until now (11/2023), DALL-E OpenAI API's does not support images with size > 4mb. So, to allow the user to edit it's image anyway, this plugin tries, incrementally, to reduce the size of the image, affecting the final result.
+- Large images: Until now (11/2023), DALL-E OpenAI API's does not support images with size > 4mb. So, to allow the user to edit it's image anyway, this plugin tries, incrementally, to reduce the size of the image that's sent to DALL-E (not the one that is being edited), affecting the completion final result quality.
 
 ## License
 
